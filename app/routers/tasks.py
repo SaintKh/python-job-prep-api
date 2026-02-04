@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, status
 from typing import List
 
-from ..schemas import Task, TaskCreate, TaskUpdate
+from ..schemas import Task, TaskCreate, TaskUpdate, TaskPatch
 from ..db import tasks
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
@@ -39,6 +39,24 @@ def update_task(task_id: int, update: TaskUpdate):
             tasks[i] = updated_task
             return updated_task
     raise HTTPException(status_code=404, detail="Task not found")
+
+@router.patch("/{task_id}", response_model=Task)
+def patch_task(task_id: int, patch: TaskPatch):
+    # If the client sends an empty body like {}, we should reject it
+    if patch.model_dump(exclude_unset=True) == {}:
+        raise HTTPException(status_code=400, detail="No fields provided to update")
+
+    for i, task in enumerate(tasks):
+        if task.id == task_id:
+            updated_data = task.model_dump()
+            updated_data.update(patch.model_dump(exclude_unset=True))
+
+            updated_task = Task(**updated_data)
+            tasks[i] = updated_task
+            return updated_task
+
+    raise HTTPException(status_code=404, detail="Task not found")
+
 
 
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
