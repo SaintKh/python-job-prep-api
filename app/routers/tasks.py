@@ -24,6 +24,13 @@ def get_task(task_id: int):
 def create_task(task: TaskCreate):
     # Import next_id lazily so we can update it
     from .. import db
+    for existing in tasks:
+        if existing.title.lower() == task.title.lower():
+            raise HTTPException(
+                status_code=400,
+                detail="Task with this title already exists"
+        )
+
 
     new_task = Task(id=db.next_id, title=task.title, done=task.done)
     tasks.append(new_task)
@@ -33,6 +40,11 @@ def create_task(task: TaskCreate):
 
 @router.put("/{task_id}", response_model=Task)
 def update_task(task_id: int, update: TaskUpdate):
+    # Prevent duplicates (ignore the task we're updating)
+    for existing in tasks:
+        if existing.id != task_id and existing.title.lower() == update.title.lower():
+            raise HTTPException(status_code=400, detail="Task with this title already exists")
+
     for i, task in enumerate(tasks):
         if task.id == task_id:
             updated_task = Task(id=task_id, title=update.title, done=update.done)
@@ -42,20 +54,33 @@ def update_task(task_id: int, update: TaskUpdate):
 
 @router.patch("/{task_id}", response_model=Task)
 def patch_task(task_id: int, patch: TaskPatch):
-    # If the client sends an empty body like {}, we should reject it
+    # Reject completely empty PATCH body
     if patch.model_dump(exclude_unset=True) == {}:
         raise HTTPException(status_code=400, detail="No fields provided to update")
 
     for i, task in enumerate(tasks):
         if task.id == task_id:
+
+            patch_data = patch.model_dump(exclude_unset=True)
+
+            # Prevent duplicate titles if title is being changed
+            if "title" in patch_data:
+                for existing in tasks:
+                    if existing.id != task_id and existing.title.lower() == patch_data["title"].lower():
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Task with this title already exists"
+                        )
+
             updated_data = task.model_dump()
-            updated_data.update(patch.model_dump(exclude_unset=True))
+            updated_data.update(patch_data)
 
             updated_task = Task(**updated_data)
             tasks[i] = updated_task
             return updated_task
 
     raise HTTPException(status_code=404, detail="Task not found")
+
 
 
 
