@@ -132,3 +132,74 @@ def test_register_short_password_fails(client):
     )
 
     assert response.status_code == 422
+
+def test_login_success(client):
+    client.post(
+        "/register",
+        json={"username": "testuser", "password": "secret123"}
+    )
+
+    response = client.post(
+        "/login",
+        data={
+            "username": "testuser",
+            "password": "secret123"
+        }
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+
+
+def test_login_wrong_password(client):
+    client.post(
+        "/register",
+        json={"username": "testuser", "password": "secret123"}
+    )
+
+    response = client.post(
+        "/login",
+        data={
+            "username": "testuser",
+            "password": "wrongpassword"
+        }
+    )
+
+    assert response.status_code == 401
+
+
+def test_me_requires_auth(client):
+    response = client.get("/me")
+
+    assert response.status_code == 401
+
+def test_me_with_valid_token(client):
+    client.post(
+        "/register",
+        json={"username": "testuser", "password": "secret123"}
+    )
+
+    login_response = client.post(
+        "/login",
+        data={
+            "username": "testuser",
+            "password": "secret123"
+        }
+    )
+
+    token = login_response.json()["access_token"]
+
+    response = client.get(
+        "/me",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["username"] == "testuser"
+    assert "id" in data
