@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: python-job-prep-api
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT
