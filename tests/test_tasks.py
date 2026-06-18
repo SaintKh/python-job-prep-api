@@ -1,7 +1,24 @@
+def register_and_login(client, username="testuser", password="secret123"):
+    client.post(
+        "/register",
+        json={"username": username, "password": password}
+    )
+
+    login_response = client.post(
+        "/login",
+        data={"username": username, "password": password}
+    )
+
+    token = login_response.json()["access_token"]
+
+    return {"Authorization": f"Bearer {token}"}
+
 def test_create_task(client):
+    headers = register_and_login(client)
     response = client.post(
         "/tasks",
-        json={"title": "Test Task", "done": False}
+        json={"title": "Test Task", "done": False},
+        headers = headers
     )
 
     assert response.status_code == 201
@@ -13,41 +30,76 @@ def test_create_task(client):
 
 
 def test_get_tasks(client):
-    client.post("/tasks", json={"title": "Task 1", "done": False})
+    headers = register_and_login(client)
 
-    response = client.get("/tasks")
+    client.post(
+        "/tasks",
+        json={"title": "Task 1", "done": False},
+        headers=headers
+    )
+
+    response = client.get("/tasks", headers=headers)
 
     assert response.status_code == 200
     assert len(response.json()) == 1
 
 
 def test_duplicate_title(client):
-    client.post("/tasks", json={"title": "Duplicate", "done": False})
+    headers = register_and_login(client)
 
-    response = client.post("/tasks", json={"title": "Duplicate", "done": False})
+    client.post(
+        "/tasks",
+        json={"title": "Duplicate", "done": False},
+        headers=headers
+    )
+
+    response = client.post(
+        "/tasks",
+        json={"title": "Duplicate", "done": False},
+        headers=headers
+    )
 
     assert response.status_code == 409
 
 
 def test_get_nonexistent_task(client):
-    response = client.get("/tasks/999")
+    headers = register_and_login(client)
+
+    response = client.get("/tasks/999", headers=headers)
 
     assert response.status_code == 404
 
 
 def test_delete_task(client):
-    create = client.post("/tasks", json={"title": "Delete Me", "done": False})
+    headers = register_and_login(client)
+
+    create = client.post(
+        "/tasks",
+        json={"title": "Delete Me", "done": False},
+        headers=headers
+    )
     task_id = create.json()["id"]
 
-    response = client.delete(f"/tasks/{task_id}")
+    response = client.delete(f"/tasks/{task_id}", headers=headers)
 
     assert response.status_code == 204
 
+
 def test_put_task_updates_title_and_done(client):
-    create = client.post("/tasks", json={"title": "Original", "done": False})
+    headers = register_and_login(client)
+
+    create = client.post(
+        "/tasks",
+        json={"title": "Original", "done": False},
+        headers=headers
+    )
     task_id = create.json()["id"]
 
-    response = client.put(f"/tasks/{task_id}", json={"title": "Updated", "done": True})
+    response = client.put(
+        f"/tasks/{task_id}",
+        json={"title": "Updated", "done": True},
+        headers=headers
+    )
 
     assert response.status_code == 200
     data = response.json()
@@ -57,36 +109,62 @@ def test_put_task_updates_title_and_done(client):
 
 
 def test_patch_task_updates_single_field(client):
-    create = client.post("/tasks", json={"title": "Patch Me", "done": False})
+    headers = register_and_login(client)
+
+    create = client.post(
+        "/tasks",
+        json={"title": "Patch Me", "done": False},
+        headers=headers
+    )
     task_id = create.json()["id"]
 
-    response = client.patch(f"/tasks/{task_id}", json={"done": True})
+    response = client.patch(
+        f"/tasks/{task_id}",
+        json={"done": True},
+        headers=headers
+    )
 
     assert response.status_code == 200
     data = response.json()
     assert data["id"] == task_id
-    assert data["title"] == "Patch Me"   # unchanged
+    assert data["title"] == "Patch Me"
     assert data["done"] is True
 
 
 def test_patch_empty_body_returns_400(client):
-    create = client.post("/tasks", json={"title": "No Fields", "done": False})
+    headers = register_and_login(client)
+
+    create = client.post(
+        "/tasks",
+        json={"title": "No Fields", "done": False},
+        headers=headers
+    )
     task_id = create.json()["id"]
 
-    response = client.patch(f"/tasks/{task_id}", json={})
+    response = client.patch(f"/tasks/{task_id}", json={}, headers=headers)
 
     assert response.status_code == 400
 
 
 def test_timestamps_created_at_constant_updated_at_changes_on_patch(client):
-    create = client.post("/tasks", json={"title": "Time Test", "done": False})
+    headers = register_and_login(client)
+
+    create = client.post(
+        "/tasks",
+        json={"title": "Time Test", "done": False},
+        headers=headers
+    )
     task_id = create.json()["id"]
 
     created_data = create.json()
     created_at_1 = created_data["created_at"]
     updated_at_1 = created_data["updated_at"]
 
-    patch = client.patch(f"/tasks/{task_id}", json={"done": True})
+    patch = client.patch(
+        f"/tasks/{task_id}",
+        json={"done": True},
+        headers=headers
+    )
     assert patch.status_code == 200
 
     patched_data = patch.json()
@@ -203,3 +281,28 @@ def test_me_with_valid_token(client):
     data = response.json()
     assert data["username"] == "testuser"
     assert "id" in data
+
+
+def test_users_only_see_their_own_tasks(client):
+    user1_headers = register_and_login(
+        client,
+        username="user1",
+        password="secret123"
+    )
+
+    user2_headers = register_and_login(
+        client,
+        username="user2",
+        password="secret123"
+    )
+
+    client.post(
+        "/tasks",
+        json={"title": "User 1 Task", "done": False},
+        headers=user1_headers
+    )
+
+    response = client.get("/tasks", headers=user2_headers)
+
+    assert response.status_code == 200
+    assert response.json() == []

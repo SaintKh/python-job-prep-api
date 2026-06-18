@@ -1,3 +1,5 @@
+
+
 from datetime import datetime, timezone
 from typing import List
 
@@ -8,30 +10,55 @@ from sqlalchemy.exc import IntegrityError
 from ..schemas import Task, TaskCreate, TaskUpdate, TaskPatch
 from ..database import get_db
 from .. import models
+from .users import get_current_user
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
 
 @router.get("", response_model=List[Task])
-def list_tasks(db: Session = Depends(get_db)):
-    return db.query(models.Task).all()
+def list_tasks(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return (
+        db.query(models.Task)
+        .filter(models.Task.owner_id == current_user.id)
+        .all()
+    )
 
 
 @router.get("/{task_id}", response_model=Task)
-def get_task(task_id: int, db: Session = Depends(get_db)):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+def get_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    task = (
+        db.query(models.Task)
+        .filter(models.Task.id == task_id)
+        .filter(models.Task.owner_id == current_user.id)
+        .first()
+    )
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
     return task
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=Task)
-def create_task(task: TaskCreate, db: Session = Depends(get_db)):
+def create_task(
+    task: TaskCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     existing = (
         db.query(models.Task)
+        .filter(models.Task.owner_id == current_user.id)
         .filter(models.Task.title.ilike(task.title))
         .first()
     )
+
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -39,14 +66,17 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db)):
         )
 
     now = datetime.now(timezone.utc)
+
     db_task = models.Task(
         title=task.title,
         done=task.done,
+        owner_id=current_user.id,
         created_at=now,
         updated_at=now,
     )
 
     db.add(db_task)
+
     try:
         db.commit()
     except IntegrityError:
@@ -56,25 +86,35 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db)):
             detail="Task with this title already exists",
         )
 
-    db.refresh(db_task)  # ✅ refresh the ORM instance
+    db.refresh(db_task)
     return db_task
 
 
-
-
 @router.put("/{task_id}", response_model=Task)
-def update_task(task_id: int, update: TaskUpdate, db: Session = Depends(get_db)):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+def update_task(
+    task_id: int,
+    update: TaskUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    task = (
+        db.query(models.Task)
+        .filter(models.Task.id == task_id)
+        .filter(models.Task.owner_id == current_user.id)
+        .first()
+    )
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Duplicate title check (case-insensitive), ignoring this task
     duplicate = (
         db.query(models.Task)
+        .filter(models.Task.owner_id == current_user.id)
         .filter(models.Task.id != task_id)
         .filter(models.Task.title.ilike(update.title))
         .first()
     )
+
     if duplicate:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -98,32 +138,43 @@ def update_task(task_id: int, update: TaskUpdate, db: Session = Depends(get_db))
     return task
 
 
-
 @router.patch("/{task_id}", response_model=Task)
-def patch_task(task_id: int, patch: TaskPatch, db: Session = Depends(get_db)):
+def patch_task(
+    task_id: int,
+    patch: TaskPatch,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
     patch_data = patch.model_dump(exclude_unset=True)
 
-    # Reject completely empty PATCH body
     if patch_data == {}:
         raise HTTPException(status_code=400, detail="No fields provided to update")
 
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+    task = (
+        db.query(models.Task)
+        .filter(models.Task.id == task_id)
+        .filter(models.Task.owner_id == current_user.id)
+        .first()
+    )
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # If title is provided, check duplicates (case-insensitive), ignoring this task
     if "title" in patch_data:
         duplicate = (
             db.query(models.Task)
+            .filter(models.Task.owner_id == current_user.id)
             .filter(models.Task.id != task_id)
             .filter(models.Task.title.ilike(patch_data["title"]))
             .first()
         )
+
         if duplicate:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Task with this title already exists",
             )
+
         task.title = patch_data["title"]
 
     if "done" in patch_data:
@@ -144,10 +195,19 @@ def patch_task(task_id: int, patch: TaskPatch, db: Session = Depends(get_db)):
     return task
 
 
-
 @router.delete("/{task_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_task(task_id: int, db: Session = Depends(get_db)):
-    task = db.query(models.Task).filter(models.Task.id == task_id).first()
+def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    task = (
+        db.query(models.Task)
+        .filter(models.Task.id == task_id)
+        .filter(models.Task.owner_id == current_user.id)
+        .first()
+    )
+
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
